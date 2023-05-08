@@ -6,6 +6,11 @@
 #include <string.h>
 #include <ucontext.h>
 
+typedef struct dccthread{
+    char *name;
+	ucontext_t context;
+}dccthread_t;
+
 void dccthread_init(void (*func)(int), int param)
 {
     
