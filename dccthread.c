@@ -2,7 +2,6 @@
 #include "dlist.h"
 
 #include <malloc.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,8 +30,11 @@ void new_thread_stack(dccthread_t *thread)
 void next_up(void)
 {
     // what if there are no more threads to run?
+    if (dlist_is_empty(ready_threads_list))
+        return;
+    
     dccthread_t *next_thread = dlist_pop_left(ready_threads_list);
-    swapcontext(&manager_thread->context, &next_thread->context);
+    
     // current thread must be added to the end of the ready list
     current_thread = next_thread;
 }
@@ -47,7 +49,6 @@ void dccthread_init(void (*func)(int), int param)
     manager_thread -> name = "manager"; // size of manager
     getcontext(&manager_thread->context);
     makecontext(&manager_thread->context, next_up, 0);
-
 }
 
 dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
@@ -68,7 +69,8 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
 
 void dccthread_yield(void)
 {
-
+    dlist_push_right(ready_threads_list, current_thread);	
+	swapcontext(&(current_thread->context), &manager_thread->context);
 }
 
 dccthread_t * dccthread_self(void)
