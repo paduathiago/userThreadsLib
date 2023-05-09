@@ -55,13 +55,13 @@ void timed_preemption()
 {   
     timer_t timer;
     // Configure the timer signal handler
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = 0;
     sa.sa_sigaction = dccthread_yield;
     sigemptyset(&sa.sa_mask);
     if (sigaction(TIMER_SIGNAL, &sa, NULL) == -1) 
     {
-            perror("sigaction");
-            exit(1);
+        perror("sigaction");
+        exit(1);
     }
 
     // Configure the timer expiration notification
@@ -79,7 +79,8 @@ void timed_preemption()
     its.it_value.tv_sec = 0;
     its.it_value.tv_nsec = 10000000; // 10ms
     its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = 0;
+    its.it_interval.tv_nsec = 10000000;
+
     if (timer_settime(timer, 0, &its, NULL) == -1) 
     {
         perror("timer_settime");
