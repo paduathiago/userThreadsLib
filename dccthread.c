@@ -2,15 +2,22 @@
 #include "dlist.h"
 
 #include <malloc.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <ucontext.h>
 
 #define SIGSTKSZ 8192
+#define TIMER_SIGNAL SIGUSR1
+#define _XOPEN_SOURCE 700
 
 struct dlist *ready_threads_list;
-struct dlist* waiting_threads_list;
+
+struct sigevent sev;
+struct itimerspec its;
+struct sigaction sa;
 
 dccthread_t *manager_thread;
 dccthread_t *current_thread;
@@ -29,18 +36,56 @@ void new_thread_stack(dccthread_t *thread)
     thread->context.uc_stack.ss_flags = 0;
 }
 
-/*void next_up()
-{
-    // what if there are no more threads to run?
-    if (dlist_empty(ready_threads_list))
-        return;
-    
-    dccthread_t *next_thread = dlist_pop_left(ready_threads_list);
-    
-    // current thread must be added to the end of the ready list
-    current_thread = next_thread;
-    setcontext(&(current_thread->context));
-}*/
+int find_item_dlist(dccthread_t* item, struct dlist* dlist) {
+    if (dlist->count == 0) 
+        return 0;
+
+    struct dnode* current_item = dlist->head;
+    while (current_item != NULL)
+    {
+        if(current_item->data == item)
+            return 1;
+        current_item = current_item->next;
+    }
+
+    return 0;
+}
+
+void timed_preemption()
+{   
+    timer_t timer;
+    // Configure the timer signal handler
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = dccthread_yield;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(TIMER_SIGNAL, &sa, NULL) == -1) 
+    {
+            perror("sigaction");
+            exit(1);
+    }
+
+    // Configure the timer expiration notification
+    sev.sigev_notify = SIGEV_SIGNAL;
+    sev.sigev_signo = TIMER_SIGNAL;
+    sev.sigev_value.sival_ptr = &timer;
+    // Create the timer
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timer) == -1) 
+    {
+        perror("timer_create");
+        exit(1);
+    }
+
+    // Set the timer to expire in 10ms
+    its.it_value.tv_sec = 0;
+    its.it_value.tv_nsec = 10000000; // 10ms
+    its.it_interval.tv_sec = 0;
+    its.it_interval.tv_nsec = 0;
+    if (timer_settime(timer, 0, &its, NULL) == -1) 
+    {
+        perror("timer_settime");
+        exit(1);
+    }
+}
 
 void dccthread_init(void (*func)(int), int param)
 {
@@ -54,11 +99,14 @@ void dccthread_init(void (*func)(int), int param)
     getcontext(&(manager_thread->context));
     manager_thread->context.uc_link = NULL;
     new_thread_stack(manager_thread);
+
+    timed_preemption();
     
     while (!dlist_empty(ready_threads_list))
     {
         current_thread = (dccthread_t *) ready_threads_list->head->data;
         swapcontext(&(manager_thread->context), &(current_thread->context));
+
         dlist_pop_left(ready_threads_list);
     }
 
