@@ -13,6 +13,7 @@
 struct dlist *ready_threads_list;
 
 dccthread_t *manager_thread;
+dccthread_t *current_thread;
 
 typedef struct dccthread
 {
@@ -27,6 +28,15 @@ void new_thread_stack(dccthread_t *thread)
     thread->context.uc_stack.ss_flags = 0;
 }
 
+void next_up(void)
+{
+    // what if there are no more threads to run?
+    dccthread_t *next_thread = dlist_pop_left(ready_threads_list);
+    swapcontext(&manager_thread->context, &next_thread->context);
+    // current thread must be added to the end of the ready list
+    current_thread = next_thread;
+}
+
 void dccthread_init(void (*func)(int), int param)
 {
     ready_threads_list = dlist_create();
@@ -36,6 +46,7 @@ void dccthread_init(void (*func)(int), int param)
     manager_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
     manager_thread -> name = "manager"; // size of manager
     getcontext(&manager_thread->context);
+    makecontext(&manager_thread->context, next_up, 0);
 
 }
 
@@ -46,11 +57,8 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
     strcpy(new_thread->name, name);
     getcontext(&new_thread->context);
 
-    // initialize new thread's stack
     new_thread_stack(new_thread);
 
-
-    // makecontext
     makecontext(&new_thread->context, func, 1, param);
 
     dlist_push_right(ready_threads_list, new_thread);
@@ -65,7 +73,7 @@ void dccthread_yield(void)
 
 dccthread_t * dccthread_self(void)
 {
-    
+    return current_thread;
 }
 
 const char * dccthread_name(dccthread_t *tid)
