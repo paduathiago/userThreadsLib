@@ -95,7 +95,8 @@ void dccthread_exit(void)
 void dccthread_wait(dccthread_t *tid)
 {
     current_thread->waiting_for = tid;
-
+    dlist_push_right(ready_threads_list, current_thread);
+    swapcontext(&current_thread->context, &manager_thread->context);
 }
 
 dccthread_t * dccthread_self(void)
