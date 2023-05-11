@@ -9,7 +9,6 @@
 #include <time.h>
 #include <ucontext.h>
 
-#define SIGSTKSZ 8192
 #define TIMER_SIGNAL SIGUSR1
 #define _XOPEN_SOURCE 700
 
@@ -47,8 +46,12 @@ int find_item_dlist(dccthread_t* item, struct dlist* dlist) {
             return 1;
         current_item = current_item->next;
     }
-
     return 0;
+}
+
+void _preemption()
+{
+    dccthread_yield();
 }
 
 void timed_preemption()
@@ -56,7 +59,7 @@ void timed_preemption()
     timer_t timer;
     // Configure the timer signal handler
     sa.sa_flags = 0;
-    sa.sa_sigaction = dccthread_yield;
+    sa.sa_sigaction = _preemption;
     sigemptyset(&sa.sa_mask);
     if (sigaction(TIMER_SIGNAL, &sa, NULL) == -1) 
     {
@@ -69,7 +72,7 @@ void timed_preemption()
     sev.sigev_signo = TIMER_SIGNAL;
     sev.sigev_value.sival_ptr = &timer;
     // Create the timer
-    if (timer_create(CLOCK_MONOTONIC, &sev, &timer) == -1) 
+    if (timer_create(CLOCK_PROCESS_CPUTIME_ID, &sev, &timer) == -1) 
     {
         perror("timer_create");
         exit(1);
