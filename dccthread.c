@@ -14,12 +14,6 @@
 
 struct dlist *ready_threads_list;
 
-struct sigevent sev;
-struct itimerspec its;
-struct sigaction sa;
-
-sigset_t preemption_mask;
-
 ucontext_t manager_context;
 dccthread_t *current_thread;
 
@@ -30,6 +24,15 @@ typedef struct dccthread
     dccthread_t *waiting_for;
 }dccthread_t;
 
+typedef struct timer_data{
+    timer_t timer;
+    struct sigevent event;
+    struct itimerspec delta;
+    struct sigaction action;
+} timer_data_t;
+
+timer_data_t preemption_timer;
+
 
 void new_thread_stack(dccthread_t *thread)
 {
@@ -38,16 +41,13 @@ void new_thread_stack(dccthread_t *thread)
     thread->context.uc_stack.ss_flags = 0;
 }
 
-int find_item_dlist(dccthread_t* item, struct dlist* dlist) {
-    if (dlist->count == 0) 
-        return 0;
-
-    struct dnode* current_item = dlist->head;
-    while (current_item != NULL)
+int dlist_find(dccthread_t* item, struct dlist* dlist) {
+    struct dnode* node = dlist->head;
+    while (node != NULL)
     {
-        if(current_item->data == item)
+        if(node->data == item)
             return 1;
-        current_item = current_item->next;
+        node = node->next;
     }
     return 0;
 }
@@ -59,35 +59,34 @@ void _preemption(int _)
 
 void timed_preemption()
 {   
-    timer_t timer;
     // Configure the timer signal handler
-    sa.sa_flags = 0;
-    sa.sa_handler = _preemption;
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(TIMER_SIGNAL, &sa, NULL) == -1) 
+    preemption_timer.action.sa_flags = 0;
+    preemption_timer.action.sa_handler = _preemption;
+    sigemptyset(&preemption_timer.action.sa_mask);
+    if (sigaction(TIMER_SIGNAL, &preemption_timer.action, NULL) == -1) 
     {
         perror("sigaction");
         exit(1);
     }
 
     // Configure the timer expiration notification
-    sev.sigev_notify = SIGEV_SIGNAL;
-    sev.sigev_signo = TIMER_SIGNAL;
-    sev.sigev_value.sival_ptr = &timer;
+    preemption_timer.event.sigev_notify = SIGEV_SIGNAL;
+    preemption_timer.event.sigev_signo = TIMER_SIGNAL;
+    preemption_timer.event.sigev_value.sival_ptr = &preemption_timer.timer;
     // Create the timer
-    if (timer_create(CLOCK_PROCESS_CPUTIME_ID, &sev, &timer) == -1) 
+    if (timer_create(CLOCK_PROCESS_CPUTIME_ID, &preemption_timer.event, &preemption_timer.timer) == -1) 
     {
         perror("timer_create");
         exit(1);
     }
 
     // Set the timer to expire in 10ms
-    its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = 10000000; // 10ms
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = 10000000;
+    preemption_timer.delta.it_value.tv_sec = 0;
+    preemption_timer.delta.it_value.tv_nsec = 10000000; // 10ms
+    preemption_timer.delta.it_interval.tv_sec = 0;
+    preemption_timer.delta.it_interval.tv_nsec = 10000000;
 
-    if (timer_settime(timer, 0, &its, NULL) == -1) 
+    if (timer_settime(preemption_timer.timer, 0, &preemption_timer.delta, NULL) == -1) 
     {
         perror("timer_settime");
         exit(1);
