@@ -18,7 +18,9 @@ struct sigevent sev;
 struct itimerspec its;
 struct sigaction sa;
 
-dccthread_t *manager_thread;
+sigset_t preemption_mask;
+
+ucontext_t manager_context;
 dccthread_t *current_thread;
 
 typedef struct dccthread
@@ -27,6 +29,7 @@ typedef struct dccthread
 	ucontext_t context;
     dccthread_t *waiting_for;
 }dccthread_t;
+
 
 void new_thread_stack(dccthread_t *thread)
 {
@@ -49,7 +52,7 @@ int find_item_dlist(dccthread_t* item, struct dlist* dlist) {
     return 0;
 }
 
-void _preemption()
+void _preemption(int _)
 {
     dccthread_yield();
 }
@@ -59,7 +62,7 @@ void timed_preemption()
     timer_t timer;
     // Configure the timer signal handler
     sa.sa_flags = 0;
-    sa.sa_sigaction = _preemption;
+    sa.sa_handler = _preemption;
     sigemptyset(&sa.sa_mask);
     if (sigaction(TIMER_SIGNAL, &sa, NULL) == -1) 
     {
@@ -97,19 +100,19 @@ void dccthread_init(void (*func)(int), int param)
     
     dccthread_create("main", func, param); // create main thread
     
-    manager_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
+    /* manager_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
     manager_thread -> name = (char *) malloc(sizeof(char) * strlen("manager"));
-    manager_thread -> name = "manager";
-    getcontext(&(manager_thread->context));
-    manager_thread->context.uc_link = NULL;
-    new_thread_stack(manager_thread);
+    manager_thread -> name = "manager"; */
+    getcontext(&(manager_context));
+    manager_context.uc_link = NULL;
+    //new_thread_stack(manager_thread);
 
     timed_preemption();
     
     while (!dlist_empty(ready_threads_list))
     {
         current_thread = (dccthread_t *) ready_threads_list->head->data;
-        swapcontext(&(manager_thread->context), &(current_thread->context));
+        swapcontext(&(manager_context), &(current_thread->context));
 
         dlist_pop_left(ready_threads_list);
     }
@@ -122,33 +125,33 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
     dccthread_t *new_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
     new_thread->name = (char *) malloc(sizeof(char) * strlen(name));
     strcpy(new_thread->name, name);
+    new_thread->waiting_for = NULL;
     
     getcontext(&(new_thread->context));
-    new_thread->context.uc_link = &(manager_thread->context);
+    new_thread->context.uc_link = &(manager_context);
     new_thread_stack(new_thread);
     dlist_push_right(ready_threads_list, new_thread);
     makecontext(&(new_thread->context), (void (*)())func, 1, param);
-    
     return new_thread;
 }
 
 void dccthread_yield(void)
 {
     dlist_push_right(ready_threads_list, current_thread);	
-	swapcontext(&(current_thread->context), &(manager_thread->context));
+	swapcontext(&(current_thread->context), &(manager_context));
 }
 
 void dccthread_exit(void)
 {
     free(current_thread);
-    setcontext(&(manager_thread->context));
+    setcontext(&(manager_context));
 }
 
 void dccthread_wait(dccthread_t *tid)
 {
     current_thread->waiting_for = tid;
     dlist_push_right(ready_threads_list, current_thread);
-    swapcontext(&current_thread->context, &manager_thread->context);
+    swapcontext(&current_thread->context, &manager_context);
 }
 
 dccthread_t * dccthread_self(void)
