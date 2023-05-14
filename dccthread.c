@@ -152,7 +152,7 @@ void dccthread_init(void (*func)(int), int param)
             continue;
         }
 
-        if(dlist_find(current_thread->waiting_for, ready_threads_list))
+        if(dlist_find(current_thread->waiting_for, sleeping_threads_list))
         {
             dlist_push_right(ready_threads_list,current_thread);
             continue;
@@ -233,11 +233,11 @@ void dccthread_sleep(struct timespec ts)
     sleep_timer.action.sa_flags = SA_SIGINFO;
     sleep_timer.action.sa_sigaction  = __resume;
     sleep_timer.action.sa_mask = mask1;
-    sigaction(SIGUSR2, &sleep_timer.action, NULL);
+    sigaction(SIGRTMAX, &(sleep_timer.action), NULL);
 
     sleep_timer.event.sigev_notify = SIGEV_SIGNAL;
+    sleep_timer.event.sigev_signo = SIGRTMAX;
     sleep_timer.event.sigev_value.sival_ptr = current_thread;
-    sleep_timer.event.sigev_signo = SIGUSR2;
     timer_create(CLOCK_REALTIME, &(sleep_timer.event), &(sleep_timer.timer));
 
     sleep_timer.delta.it_value = ts;
