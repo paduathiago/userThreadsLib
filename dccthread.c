@@ -12,7 +12,12 @@
 #define TIMER_SIGNAL SIGUSR1
 #define _XOPEN_SOURCE 700
 
-struct dlist *ready_threads_list;
+typedef struct dlist list_t;
+
+list_t *ready_threads_list;
+list_t *sleeping_threads_list;
+
+sigset_t mask1, mask2;
 
 ucontext_t manager_context;
 dccthread_t *current_thread;
@@ -22,6 +27,7 @@ typedef struct dccthread
     char *name;
 	ucontext_t context;
     dccthread_t *waiting_for;
+
 }dccthread_t;
 
 typedef struct timer_data{
@@ -31,7 +37,25 @@ typedef struct timer_data{
     struct sigaction action;
 } timer_data_t;
 
+void block_preemp(){
+    sigprocmask(SIG_BLOCK, &mask1, NULL);
+}
+
+
+void unblock_preemp(){
+    sigprocmask(SIG_UNBLOCK, &mask1, NULL);
+}
+
+void block_sleep(){
+    sigprocmask(SIG_BLOCK, &mask2, NULL);
+}
+
+void unblock_sleep(){
+   sigprocmask(SIG_UNBLOCK, &mask2, NULL);
+}
+
 timer_data_t preemption_timer;
+timer_data_t sleep_timer;
 
 
 void new_thread_stack(dccthread_t *thread)
@@ -41,7 +65,7 @@ void new_thread_stack(dccthread_t *thread)
     thread->context.uc_stack.ss_flags = 0;
 }
 
-int dlist_find(dccthread_t* item, struct dlist* dlist) {
+int dlist_find(dccthread_t* item, list_t* dlist) {
     struct dnode* node = dlist->head;
     while (node != NULL)
     {
@@ -96,6 +120,8 @@ void timed_preemption()
 void dccthread_init(void (*func)(int), int param)
 {
     ready_threads_list = dlist_create();
+    sleeping_threads_list = dlist_create();
+
     
     dccthread_create("main", func, param); // create main thread
     
@@ -103,17 +129,43 @@ void dccthread_init(void (*func)(int), int param)
     manager_thread -> name = (char *) malloc(sizeof(char) * strlen("manager"));
     manager_thread -> name = "manager"; */
     getcontext(&(manager_context));
+
+    sigemptyset(&mask2);
+    sigaddset(&mask2, SIGRTMAX);
+
+    sigemptyset(&mask2);
+	sigaddset(&mask2, SIGRTMIN);
+	sigaddset(&mask2, SIGRTMAX);
+	sigprocmask(SIG_SETMASK, &mask2, NULL);	
+
+    manager_context.uc_sigmask = mask1;
     manager_context.uc_link = NULL;
+
     //new_thread_stack(manager_thread);
 
     timed_preemption();
     
-    while (!dlist_empty(ready_threads_list))
+    while (!dlist_empty(ready_threads_list) || !dlist_empty(sleeping_threads_list))
     {
-        current_thread = (dccthread_t *) ready_threads_list->head->data;
-        swapcontext(&(manager_context), &(current_thread->context));
 
-        dlist_pop_left(ready_threads_list);
+		block_sleep();
+        unblock_sleep();
+
+        current_thread = (dccthread_t *) dlist_pop_left(ready_threads_list);
+
+        if(current_thread->waiting_for == NULL){
+            swapcontext(&(manager_context), &(current_thread->context));
+            continue;
+        }
+
+        if(dlist_find(current_thread->waiting_for, ready_threads_list)){
+            dlist_push_right(ready_threads_list,current_thread);
+            continue;
+        }
+
+        current_thread->waiting_for = NULL;
+        swapcontext(&(manager_context), &(current_thread->context));
+        
     }
 
     exit(EXIT_SUCCESS);
@@ -121,6 +173,8 @@ void dccthread_init(void (*func)(int), int param)
 
 dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
 {
+    block_preemp();
+
     dccthread_t *new_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
     new_thread->name = (char *) malloc(sizeof(char) * strlen(name));
     strcpy(new_thread->name, name);
@@ -131,26 +185,73 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
     new_thread_stack(new_thread);
     dlist_push_right(ready_threads_list, new_thread);
     makecontext(&(new_thread->context), (void (*)())func, 1, param);
+
+    unblock_preemp();
     return new_thread;
 }
 
 void dccthread_yield(void)
 {
+    block_preemp();
     dlist_push_right(ready_threads_list, current_thread);	
 	swapcontext(&(current_thread->context), &(manager_context));
+    unblock_preemp();
 }
 
 void dccthread_exit(void)
 {
+    block_preemp();
     free(current_thread);
     setcontext(&(manager_context));
+    unblock_preemp();
 }
 
 void dccthread_wait(dccthread_t *tid)
 {
+    block_preemp();
+    if(tid == NULL)
+        exit(EXIT_FAILURE);
+
     current_thread->waiting_for = tid;
     dlist_push_right(ready_threads_list, current_thread);
-    swapcontext(&current_thread->context, &manager_context);
+    swapcontext(&(current_thread->context), &manager_context);
+    unblock_preemp();
+}
+
+int comparator(const void *l, const void *r, void *_){
+    dccthread_t * val_l = (dccthread_t *)l;
+    dccthread_t * val_r = (dccthread_t *)r;
+    return !(val_l == val_r);
+}
+
+void __resume(int _, siginfo_t *si, void *__){
+    dccthread_t *thread = (dccthread_t *)si->si_value.sival_ptr;
+    dlist_find_remove(sleeping_threads_list, thread, comparator, NULL);
+    dlist_push_right(ready_threads_list, thread);
+}
+
+void dccthread_sleep(struct timespec ts)
+{
+    block_preemp();
+
+    sleep_timer.action.sa_flags = SA_SIGINFO;
+    sleep_timer.action.sa_sigaction  = __resume;
+    sleep_timer.action.sa_mask = mask1;
+    sigaction(SIGUSR2, &sleep_timer.action, NULL);
+
+    sleep_timer.event.sigev_notify = SIGEV_SIGNAL;
+    sleep_timer.event.sigev_value.sival_ptr = current_thread;
+    sleep_timer.event.sigev_signo = SIGUSR2;
+    timer_create(CLOCK_REALTIME, &(sleep_timer.event), &(sleep_timer.timer));
+
+    sleep_timer.delta.it_value = ts;
+    sleep_timer.delta.it_interval.tv_nsec = 0;
+    sleep_timer.delta.it_interval.tv_sec = 0;
+    timer_settime(sleep_timer.timer, 0, &(sleep_timer.delta), NULL);
+
+    dlist_push_right(sleeping_threads_list, current_thread);
+    swapcontext(&(current_thread->context), &manager_context);
+    unblock_preemp();
 }
 
 dccthread_t * dccthread_self(void)
