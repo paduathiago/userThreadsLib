@@ -41,7 +41,6 @@ void block_preemp(){
     sigprocmask(SIG_BLOCK, &mask1, NULL);
 }
 
-
 void unblock_preemp(){
     sigprocmask(SIG_UNBLOCK, &mask1, NULL);
 }
@@ -125,9 +124,6 @@ void dccthread_init(void (*func)(int), int param)
     
     dccthread_create("main", func, param); // create main thread
     
-    /* manager_thread = (dccthread_t *) malloc(sizeof(dccthread_t));
-    manager_thread -> name = (char *) malloc(sizeof(char) * strlen("manager"));
-    manager_thread -> name = "manager"; */
     getcontext(&(manager_context));
 
     sigemptyset(&mask2);
@@ -141,31 +137,29 @@ void dccthread_init(void (*func)(int), int param)
     manager_context.uc_sigmask = mask1;
     manager_context.uc_link = NULL;
 
-    //new_thread_stack(manager_thread);
-
     timed_preemption();
     
     while (!dlist_empty(ready_threads_list) || !dlist_empty(sleeping_threads_list))
     {
-
 		block_sleep();
         unblock_sleep();
 
         current_thread = (dccthread_t *) dlist_pop_left(ready_threads_list);
 
-        if(current_thread->waiting_for == NULL){
+        if(current_thread->waiting_for == NULL)
+        {
             swapcontext(&(manager_context), &(current_thread->context));
             continue;
         }
 
-        if(dlist_find(current_thread->waiting_for, ready_threads_list)){
+        if(dlist_find(current_thread->waiting_for, ready_threads_list))
+        {
             dlist_push_right(ready_threads_list,current_thread);
             continue;
         }
 
         current_thread->waiting_for = NULL;
         swapcontext(&(manager_context), &(current_thread->context));
-        
     }
 
     exit(EXIT_SUCCESS);
