@@ -85,8 +85,8 @@ void timed_preemption()
     // Configure the timer signal handler
     preemption_timer.action.sa_flags = 0;
     preemption_timer.action.sa_handler = _preemption;
-    sigemptyset(&preemption_timer.action.sa_mask);
-    if (sigaction(TIMER_SIGNAL, &preemption_timer.action, NULL) == -1) 
+    //sigemptyset(&preemption_timer.action.sa_mask);
+    if (sigaction(SIGRTMIN, &preemption_timer.action, NULL) == -1) 
     {
         perror("sigaction");
         exit(1);
@@ -94,7 +94,7 @@ void timed_preemption()
 
     // Configure the timer expiration notification
     preemption_timer.event.sigev_notify = SIGEV_SIGNAL;
-    preemption_timer.event.sigev_signo = TIMER_SIGNAL;
+    preemption_timer.event.sigev_signo = SIGRTMIN;
     preemption_timer.event.sigev_value.sival_ptr = &preemption_timer.timer;
     // Create the timer
     if (timer_create(CLOCK_PROCESS_CPUTIME_ID, &preemption_timer.event, &preemption_timer.timer) == -1) 
@@ -129,10 +129,10 @@ void dccthread_init(void (*func)(int), int param)
     sigemptyset(&mask2);
     sigaddset(&mask2, SIGRTMAX);
 
-    sigemptyset(&mask2);
-	sigaddset(&mask2, SIGRTMIN);
-	sigaddset(&mask2, SIGRTMAX);
-	sigprocmask(SIG_SETMASK, &mask2, NULL);	
+    sigemptyset(&mask1);
+	sigaddset(&mask1, SIGRTMIN);
+	sigaddset(&mask1, SIGRTMAX);
+	sigprocmask(SIG_SETMASK, &mask1, NULL);	
 
     manager_context.uc_sigmask = mask1;
     manager_context.uc_link = NULL;
@@ -141,8 +141,8 @@ void dccthread_init(void (*func)(int), int param)
     
     while (!dlist_empty(ready_threads_list) || !dlist_empty(sleeping_threads_list))
     {
-		block_sleep();
         unblock_sleep();
+		block_sleep();
 
         current_thread = (dccthread_t *) dlist_pop_left(ready_threads_list);
 
@@ -178,6 +178,8 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int), int param)
     new_thread->context.uc_link = &(manager_context);
     new_thread_stack(new_thread);
     dlist_push_right(ready_threads_list, new_thread);
+
+    sigemptyset(&(new_thread->context.uc_sigmask));
     makecontext(&(new_thread->context), (void (*)())func, 1, param);
 
     unblock_preemp();
