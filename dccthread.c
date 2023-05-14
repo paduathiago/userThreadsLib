@@ -82,30 +82,28 @@ void _preemption(int _)
 
 void timed_preemption()
 {   
-    // Configure the timer signal handler
+
     preemption_timer.action.sa_flags = 0;
     preemption_timer.action.sa_handler = _preemption;
-    //sigemptyset(&preemption_timer.action.sa_mask);
+
     if (sigaction(SIGRTMIN, &preemption_timer.action, NULL) == -1) 
     {
         perror("sigaction");
         exit(1);
     }
 
-    // Configure the timer expiration notification
     preemption_timer.event.sigev_notify = SIGEV_SIGNAL;
     preemption_timer.event.sigev_signo = SIGRTMIN;
     preemption_timer.event.sigev_value.sival_ptr = &preemption_timer.timer;
-    // Create the timer
+
     if (timer_create(CLOCK_PROCESS_CPUTIME_ID, &preemption_timer.event, &preemption_timer.timer) == -1) 
     {
         perror("timer_create");
         exit(1);
     }
 
-    // Set the timer to expire in 10ms
     preemption_timer.delta.it_value.tv_sec = 0;
-    preemption_timer.delta.it_value.tv_nsec = 10000000; // 10ms
+    preemption_timer.delta.it_value.tv_nsec = 10000000;
     preemption_timer.delta.it_interval.tv_sec = 0;
     preemption_timer.delta.it_interval.tv_nsec = 10000000;
 
@@ -122,7 +120,7 @@ void dccthread_init(void (*func)(int), int param)
     sleeping_threads_list = dlist_create();
 
     
-    dccthread_create("main", func, param); // create main thread
+    dccthread_create("main", func, param);
     
     getcontext(&(manager_context));
 
@@ -139,7 +137,7 @@ void dccthread_init(void (*func)(int), int param)
 
     timed_preemption();
     
-    while (!dlist_empty(ready_threads_list) || !dlist_empty(sleeping_threads_list))
+    while (!dlist_empty(ready_threads_list))
     {
         unblock_sleep();
 		block_sleep();
